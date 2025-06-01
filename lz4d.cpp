@@ -684,21 +684,14 @@ class LZ4Archive {
             //           entry.original_size << ").\n";
         }
 
-        if (!is_batch_extracting) {
-            std::cout << "Extracted (stream): " << archive_name << " -> " << out_file_actual_path << " ("
-                      << (entry.original_size ? entry.original_size : actual_decompressed_size) << " bytes)\n";
-        }
+        std::cout << "Extracted (stream): " << archive_name << " -> " << out_file_actual_path << " ("
+                    << (entry.original_size ? entry.original_size : actual_decompressed_size) << " bytes)\n";
     }
 
-    // Helper for extract_all progress
-    bool is_batch_extracting = false;
-
     void extract_all(const std::string& output_dir_base = ".") {
-        is_batch_extracting = true;  // Suppress individual extract messages
         read_directory();
         if (directory.empty()) {
             std::cout << "Archive is empty or not found.\n";
-            is_batch_extracting = false;
             return;
         }
         fs::path base_output_fs_path(output_dir_base);
@@ -720,7 +713,6 @@ class LZ4Archive {
         }
         std::cout << std::endl;  // Final newline for progress bar
         std::cout << "Extraction complete. " << extracted_count << "/" << total_to_extract << " files processed.\n";
-        is_batch_extracting = false;
     }
 
     void list_files() {
