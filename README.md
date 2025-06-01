@@ -21,3 +21,8 @@ Examples:
   ./lz4d archive.lz4a extract -o output_dir/
   ./lz4d archive.lz4a extract file1.txt path/in/archive/file.txt -o output_dir/
 ~~~
+
+
+### TODO
+
+- allow custom tmpdir
