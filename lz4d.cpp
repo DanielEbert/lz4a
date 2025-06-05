@@ -693,14 +693,21 @@ class LZ4Archive {
             std::cout << "Archive is empty or not found.\n";
             return;
         }
+
+        std::vector<std::string> filenames_to_extract;
+        filenames_to_extract.reserve(directory.size());
+        for (const auto& [filename, entry] : directory) {
+            filenames_to_extract.push_back(filename);
+        }
+
         fs::path base_output_fs_path(output_dir_base);
         if (!fs::exists(base_output_fs_path)) fs::create_directories(base_output_fs_path);
 
-        size_t total_to_extract = directory.size();
+        size_t total_to_extract = filenames_to_extract.size();
         size_t extracted_count = 0;
         std::cout << "Extracting " << total_to_extract << " files to " << base_output_fs_path.string() << "...\n";
 
-        for (const auto& [filename_in_archive, entry] : directory) {
+        for (const auto& filename_in_archive : filenames_to_extract) {
             extracted_count++;
             print_progress("Extracting", extracted_count, total_to_extract, filename_in_archive);
             try {

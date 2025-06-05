@@ -26,6 +26,14 @@ Examples:
 ~~~
 
 
+### Install
+
+~~~
+sudo apt install liblz4-dev
+make
+~~~
+
+
 ### TODO
 
 - allow custom tmpdir
