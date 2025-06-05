@@ -523,7 +523,7 @@ class LZ4Archive {
         return result;
     }
 
-    void add_files_batch(const std::vector<std::string>& source_paths_or_dirs) {
+    void add_files_batch(const std::vector<std::string>& source_paths_or_dirs, std::string& root_dir_str) {
         if (source_paths_or_dirs.empty()) return;
         read_directory();
 
@@ -537,13 +537,12 @@ class LZ4Archive {
                 continue;
             }
             if (fs::is_regular_file(current_fs_path)) {
-                files_to_process.emplace_back(current_fs_path.string(), current_fs_path.filename().string());
+                std::string rel_path_str = fs::relative(current_fs_path.string(), root_dir_str).lexically_normal().string();
+                files_to_process.emplace_back(current_fs_path.string(), rel_path_str);
             } else if (fs::is_directory(current_fs_path)) {
-                fs::path base_dir = current_fs_path;  // Keep original path to make
-                                                      // relative paths correct
-                for (const auto& dir_entry : fs::recursive_directory_iterator(base_dir)) {
+                for (const auto& dir_entry : fs::recursive_directory_iterator(current_fs_path)) {
                     if (dir_entry.is_regular_file()) {
-                        std::string rel_path_str = fs::relative(dir_entry.path(), base_dir).lexically_normal().string();
+                        std::string rel_path_str = fs::relative(dir_entry.path(), root_dir_str).lexically_normal().string();
 #ifdef _WIN32
                         std::replace(rel_path_str.begin(), rel_path_str.end(), '\\', '/');
 #endif
@@ -724,13 +723,13 @@ class LZ4Archive {
 
         std::cout << std::left << std::setw(40) << "Filename" << std::right << std::setw(12) << "Original"
                   << std::setw(12) << "Compressed" << std::setw(8) << "Ratio" << "\n";
-        std::cout << std::string(72, '-') << "\n";
+        std::cout << std::string(112, '-') << "\n";
 
         uint64_t total_orig = 0, total_comp = 0;
         for (const auto& [name, entry] : directory) {
             double ratio_val =
                 entry.original_size > 0 ? (1.0 - (double)entry.compressed_size / entry.original_size) * 100.0 : 0.0;
-            std::cout << std::left << std::setw(40) << name.substr(0, 39) << std::right << std::setw(12)
+            std::cout << std::left << std::setw(80) << name.substr(0, 79) << std::right << std::setw(12)
                       << entry.original_size << std::setw(12) << entry.compressed_size << std::setw(7) << std::fixed
                       << std::setprecision(1) << ratio_val << "%\n";
             total_orig += entry.original_size;
@@ -739,8 +738,8 @@ class LZ4Archive {
 
         if (directory.size() > 1) {
             double total_ratio_val = total_orig > 0 ? (1.0 - (double)total_comp / total_orig) * 100.0 : 0.0;
-            std::cout << std::string(72, '-') << "\n";
-            std::cout << std::left << std::setw(40) << "TOTAL (" + std::to_string(directory.size()) + " files)"
+            std::cout << std::string(112, '-') << "\n";
+            std::cout << std::left << std::setw(80) << "TOTAL (" + std::to_string(directory.size()) + " files)"
                       << std::right << std::setw(12) << total_orig << std::setw(12) << total_comp << std::setw(7)
                       << std::fixed << std::setprecision(1) << total_ratio_val << "%\n";
         }
@@ -798,9 +797,12 @@ void show_usage(const char* program_name) {
     std::cout << "                         Uses streaming decompression.\n";
     std::cout << "  list                   List files in archive\n\n";
     std::cout << "Options:\n";
-    std::cout << "  -o <dir>               Output directory for extraction.\n\n";
+    std::cout << "  -o <dir>               Output directory for extraction.\n";
+    std::cout << "  -r <base>              Store added file paths relative to <base>.\n\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " archive.lz4a add file1.txt path/to/folder/\n";
+    std::cout << "  " << program_name << " archive.lz4a add -r /a/b /a/b/c/file1.txt\n";
+    std::cout << "                         (adds as c/file1.txt in archive)\n";
     std::cout << "  " << program_name << " archive.lz4a list\n";
     std::cout << "  " << program_name << " archive.lz4a extract -o output_dir/\n";
     std::cout << "  " << program_name
@@ -829,16 +831,23 @@ int main(int argc, char* argv[]) {
                 show_usage(argv[0]);
                 return 1;
             }
+            std::string root_dir_str = "/";
             std::vector<std::string> paths_to_add;
-            for (int i = 3; i < argc; i++) paths_to_add.push_back(argv[i]);
+            for (int i = 3; i < argc; i++) {
+                if (std::string(argv[i]) == "-r" && i + 1 < argc) {
+                    root_dir_str = argv[++i];
+                } else {
+                    paths_to_add.push_back(argv[i]);
+                }
+            }
 
             // Use batch for multiple items or single directory, direct add for single
             // file
-            if (paths_to_add.size() == 1 && fs::is_regular_file(paths_to_add[0])) {
-                archive.add_file(paths_to_add[0]);
-            } else {
-                archive.add_files_batch(paths_to_add);
-            }
+            // if (paths_to_add.size() == 1 && fs::is_regular_file(paths_to_add[0])) {
+            //     archive.add_file(paths_to_add[0]);
+            // } else {
+            archive.add_files_batch(paths_to_add, root_dir_str);
+            // }
         } else if (command_main == "extract") {
             std::string output_dir_str = ".";
             std::vector<std::string> files_to_extract;
