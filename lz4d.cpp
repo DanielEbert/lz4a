@@ -390,13 +390,15 @@ class LZ4Archive {
     uint64_t get_data_append_offset() {
         if (!fs::exists(archive_path) || fs::file_size(archive_path) == 0) return 0;
         std::ifstream temp_read(archive_path, std::ios::binary);
-        if (!temp_read) return 0;
+        if (!temp_read) throw std::runtime_error("Cannot open archive file for reading: " + archive_path);
         temp_read.seekg(0, std::ios::end);
         uint64_t total_file_size = temp_read.tellg();
-        if (total_file_size < (MAGIC_LEN + DIRECTORY_SIZE_LEN)) return 0;
+        if (total_file_size < (MAGIC_LEN + DIRECTORY_SIZE_LEN)) return 0; // Not an archive yet
         temp_read.seekg(-(MAGIC_LEN + DIRECTORY_SIZE_LEN), std::ios::end);
         uint64_t dir_block_size = read_uint64_le(temp_read);
-        if (total_file_size < (MAGIC_LEN + DIRECTORY_SIZE_LEN + dir_block_size)) return 0;
+        if (total_file_size < (MAGIC_LEN + DIRECTORY_SIZE_LEN + dir_block_size)) {
+            throw std::runtime_error("Archive is corrupted or truncated.");
+        }
         return total_file_size - (MAGIC_LEN + DIRECTORY_SIZE_LEN + dir_block_size);
     }
 
@@ -537,12 +539,24 @@ class LZ4Archive {
                 continue;
             }
             if (fs::is_regular_file(current_fs_path)) {
-                std::string rel_path_str = fs::relative(current_fs_path.string(), root_dir_str).lexically_normal().string();
+                std::string rel_path_str;
+                try {
+                    rel_path_str = fs::relative(current_fs_path, root_dir_str).lexically_normal().string();
+                } catch (const fs::filesystem_error& e) {
+                    std::cerr << "Warning: Cannot create relative path for " << current_fs_path << " with base " << root_dir_str << ". Using filename instead. Error: " << e.what() << std::endl;
+                    rel_path_str = current_fs_path.filename().string();
+                }
                 files_to_process.emplace_back(current_fs_path.string(), rel_path_str);
             } else if (fs::is_directory(current_fs_path)) {
                 for (const auto& dir_entry : fs::recursive_directory_iterator(current_fs_path)) {
                     if (dir_entry.is_regular_file()) {
-                        std::string rel_path_str = fs::relative(dir_entry.path(), root_dir_str).lexically_normal().string();
+                        std::string rel_path_str;
+                        try {
+                             rel_path_str = fs::relative(dir_entry.path(), root_dir_str).lexically_normal().string();
+                        } catch (const fs::filesystem_error& e) {
+                            std::cerr << "Warning: Cannot create relative path for " << dir_entry.path() << " with base " << root_dir_str << ". Using filename instead. Error: " << e.what() << std::endl;
+                            rel_path_str = dir_entry.path().filename().string();
+                        }
 #ifdef _WIN32
                         std::replace(rel_path_str.begin(), rel_path_str.end(), '\\', '/');
 #endif
@@ -677,9 +691,9 @@ class LZ4Archive {
         output_ofs.close();
 
         if (entry.original_size != 0 && actual_decompressed_size != entry.original_size) {
-            std::cerr << "Warning: Decompressed size (" << actual_decompressed_size
-                      << ") for " << archive_name << " does not match record (" <<
-                      entry.original_size << ").\n";
+            throw std::runtime_error("Decompressed size (" + std::to_string(actual_decompressed_size) +
+                                     ") for " + archive_name + " does not match record (" +
+                                     std::to_string(entry.original_size) + "). File is likely corrupt.");
         }
 
         std::cout << "Extracted (stream): " << archive_name << " -> " << out_file_actual_path << " ("
@@ -710,7 +724,11 @@ class LZ4Archive {
             extracted_count++;
             print_progress("Extracting", extracted_count, total_to_extract, filename_in_archive);
             try {
-                fs::path final_output_path = base_output_fs_path / filename_in_archive;
+                fs::path archive_entry_path(filename_in_archive);
+                if (archive_entry_path.is_absolute()) {
+                    archive_entry_path = archive_entry_path.relative_path();
+                }
+                fs::path final_output_path = base_output_fs_path / archive_entry_path;
                 extract_file(filename_in_archive, final_output_path.string());
             } catch (const std::exception& e) {
                 std::cerr << "\nError extracting " << filename_in_archive << ": " << e.what() << "\n";
@@ -837,11 +855,16 @@ int main(int argc, char* argv[]) {
                 show_usage(argv[0]);
                 return 1;
             }
-            std::string root_dir_str = "/";
+            std::string root_dir_str = ".";
             std::vector<std::string> paths_to_add;
             for (int i = 3; i < argc; i++) {
-                if (std::string(argv[i]) == "-r" && i + 1 < argc) {
-                    root_dir_str = argv[++i];
+                if (std::string(argv[i]) == "-r") {
+                    if (i + 1 < argc) {
+                        root_dir_str = argv[++i];
+                    } else {
+                        std::cerr << "Error: -r option requires a value." << std::endl;
+                        return 1;
+                    }
                 } else {
                     paths_to_add.push_back(argv[i]);
                 }
@@ -859,8 +882,13 @@ int main(int argc, char* argv[]) {
             std::vector<std::string> files_to_extract;
 
             for (int i = 3; i < argc; i++) {
-                if (std::string(argv[i]) == "-o" && i + 1 < argc) {
-                    output_dir_str = argv[++i];
+                if (std::string(argv[i]) == "-o") {
+                    if (i + 1 < argc) {
+                        output_dir_str = argv[++i];
+                    } else {
+                        std::cerr << "Error: -o option requires a value." << std::endl;
+                        return 1;
+                    }
                 } else {
                     files_to_extract.push_back(argv[i]);
                 }
@@ -879,10 +907,15 @@ int main(int argc, char* argv[]) {
                         archive.print_progress("Extracting", current_file_idx, total_files, file_in_archive);
                     }
                     std::string final_output_path_str;
+                    fs::path file_in_archive_path(file_in_archive);
+                    if (file_in_archive_path.is_absolute()) {
+                        file_in_archive_path = file_in_archive_path.relative_path();
+                    }
+
                     if (output_dir_str == ".") {
-                        final_output_path_str = file_in_archive;
+                        final_output_path_str = file_in_archive_path.string();
                     } else {
-                        final_output_path_str = (fs::path(output_dir_str) / file_in_archive).string();
+                        final_output_path_str = (fs::path(output_dir_str) / file_in_archive_path).string();
                     }
                     try {
                         archive.extract_file(file_in_archive, final_output_path_str);
