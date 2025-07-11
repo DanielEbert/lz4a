@@ -446,7 +446,7 @@ class LZ4Archive {
         if (!input_file_stream) throw std::runtime_error("Cannot open input file: " + file_path);
 
         uint64_t data_append_offset = get_data_append_offset();
-        std::fstream archive_fs(archive_path, std::ios::binary | std::ios::in | std::ios::out | std::ios::app);
+        std::fstream archive_fs(archive_path, std::ios::binary | std::ios::in | std::ios::out);
         if (!archive_fs.is_open()) {
             archive_fs.open(archive_path, std::ios::binary | std::ios::out | std::ios::trunc);
             if (!archive_fs.is_open()) throw std::runtime_error("Cannot open/create archive file: " + archive_path);
@@ -677,10 +677,9 @@ class LZ4Archive {
         output_ofs.close();
 
         if (entry.original_size != 0 && actual_decompressed_size != entry.original_size) {
-            // Suppress for batch, or make it optional.
-            // std::cerr << "Warning: Decompressed size (" << actual_decompressed_size
-            //           << ") for " << archive_name << " does not match record (" <<
-            //           entry.original_size << ").\n";
+            std::cerr << "Warning: Decompressed size (" << actual_decompressed_size
+                      << ") for " << archive_name << " does not match record (" <<
+                      entry.original_size << ").\n";
         }
 
         std::cout << "Extracted (stream): " << archive_name << " -> " << out_file_actual_path << " ("
